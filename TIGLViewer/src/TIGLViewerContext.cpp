@@ -39,6 +39,8 @@
 #include "AIS_InteractiveContext.hxx"
 #include "BRepBuilderAPI_MakeVertex.hxx"
 
+#include "TIGLAISColormapped.h"
+
 #include <OpenGl_GraphicDriver.hxx>
 // Shader related stuff
 #if OCC_VERSION_HEX >= VERSION_HEX_CODE(6,7,0)
@@ -347,12 +349,24 @@ void TIGLViewerContext::displayShape(const PNamedShape& pshape, Standard_Boolean
     }
 
     TIGLViewerSettings& settings = TIGLViewerSettings::Instance();
+#if 0
     Handle(AIS_TexturedShape) shape = new AIS_TexturedShape(pshape->Shape());
 
     myContext->SetMaterial(shape, Graphic3d_NOM_METALIZED, Standard_False);
     myContext->SetColor(shape, color, Standard_False);
     myContext->SetTransparency(shape, transparency, Standard_False);
     shape->SetOwnDeviationCoefficient(settings.tesselationAccuracy());
+#else
+
+    Handle(TIGLAISColormapped) shape = new TIGLAISColormapped(pshape->Shape());
+
+    myContext->SetDisplayMode(AIS_Shaded);
+//    myContext->SetMaterial(shape, Graphic3d_NOM_METALIZED, Standard_False);
+//    myContext->SetColor(shape, color, Standard_False);
+//    myContext->SetTransparency(shape, transparency, Standard_False);
+//    shape->SetOwnDeviationCoefficient(settings.tesselationAccuracy());
+#endif
+
 
 #if OCC_VERSION_HEX >= VERSION_HEX_CODE(6,7,0)
     if (!myShader.IsNull()) {
