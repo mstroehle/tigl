@@ -90,7 +90,8 @@ set(tv_src
     TIGLViewerEtaXsiDialog.cpp
     CHotsoseMeshReader.cpp
     TIGLAISTriangulation.cpp
-	TIGLAISColormapped.cpp
+    TIGLAISColormapped.cpp
+#    AIS_Gauss.cxx
     TIGLViewerErrorDialog.cpp
     TIGLViewerLogHistory.cpp
     TIGLViewerLogRedirection.cpp

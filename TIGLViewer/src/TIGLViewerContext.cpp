@@ -40,6 +40,7 @@
 #include "BRepBuilderAPI_MakeVertex.hxx"
 
 #include "TIGLAISColormapped.h"
+#include "AIS_Gauss.hxx"
 
 #include <OpenGl_GraphicDriver.hxx>
 // Shader related stuff
@@ -358,6 +359,7 @@ void TIGLViewerContext::displayShape(const PNamedShape& pshape, Standard_Boolean
     shape->SetOwnDeviationCoefficient(settings.tesselationAccuracy());
 #else
 
+//    Handle(AIS_Gauss) shape = new AIS_Gauss(pshape->Shape(), true);
     Handle(TIGLAISColormapped) shape = new TIGLAISColormapped(pshape->Shape());
 
     myContext->SetDisplayMode(AIS_Shaded);

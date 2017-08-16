@@ -22,6 +22,7 @@
 #include <Standard_DefineHandle.hxx>
 #include <Poly_Array1OfTriangle.hxx>
 #include <Poly_Triangulation.hxx>
+#include "CTiglTriangularizer.h"
 #include <Prs3d_Root.hxx>
 #include <Prs3d_ShadingAspect.hxx>
 #include <TShort_Array1OfShortReal.hxx>
@@ -31,6 +32,7 @@
 #include <Graphic3d_Group.hxx>
 #include <Graphic3d_AspectFillArea3d.hxx>
 #include <Graphic3d_ArrayOfTriangles.hxx>
+#include <Graphic3d_ArrayOfPolylines.hxx>
 #include <Select3D_SensitiveBox.hxx>
 #include <Select3D_SensitiveTriangulation.hxx>
 #include <SelectMgr_Selection.hxx>
@@ -42,6 +44,7 @@
 #include <Standard_Version.hxx>
 
 #include <GeomLProp_SLProps.hxx>
+#include <BRepTools.hxx>
 #include "BRepMesh_IncrementalMesh.hxx"
 
 #if OCC_VERSION_HEX < VERSION_HEX_CODE(6,9,0)
@@ -86,6 +89,9 @@ void TIGLAISColormapped::Compute(const Handle(PrsMgr_PresentationManager3d)& aPr
                                    const Standard_Integer aMode)
 {
 
+    std::cout << "Calling Compute function"<<std::endl;
+    std::cout << "aMode = "<<aMode<<std::endl;
+
     aPresentation->Clear();
     Handle(Graphic3d_Group) TheGroup = Prs3d_Root::CurrentGroup(aPresentation);
     TheGroup->Clear();
@@ -93,24 +99,53 @@ void TIGLAISColormapped::Compute(const Handle(PrsMgr_PresentationManager3d)& aPr
     switch (aMode) {
         case 0:
         case 1: {
-            Handle(Graphic3d_AspectFillArea3d) aspect = myDrawer->ShadingAspect()->Aspect();
+
+            Handle(Graphic3d_AspectFillArea3d) aspect = new Graphic3d_AspectFillArea3d();
+            aspect->SetInteriorStyle(Aspect_IS_SOLID);
+
             Standard_Real ambient = aspect->FrontMaterial().Ambient();
 
-            BRepMesh_IncrementalMesh(myShape,0.1);
+            TheGroup->SetPrimitivesAspect(aspect);
+
+            std::cout<<"Triangulation of shape..."<<std::flush;
+            tigl::CTiglTriangularizer t(myShape,1e-3);
+            std::cout<<"[OK]"<<std::endl;
+
+
             TopExp_Explorer faceExplorer;
             for (faceExplorer.Init(myShape, TopAbs_FACE); faceExplorer.More(); faceExplorer.Next()) {
+
+                std::cout<<"   Getting the triangulation of face..."<<std::flush;
+
+                //Get the triangulation of each face
                 TopoDS_Face face = TopoDS::Face(faceExplorer.Current());
                 TopLoc_Location loc;
                 Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(face, loc);
-                Handle(Geom_Surface) surface = BRep_Tool::Surface(face,loc);
 
                 const TColgp_Array1OfPnt& Nodes = triangulation->Nodes();
                 const TColgp_Array1OfPnt2d& UVNodes = triangulation->UVNodes();
                 const Poly_Array1OfTriangle& triangles = triangulation->Triangles();
 
                 Standard_Boolean hasVNormals = triangulation->HasNormals();
-                Standard_Boolean hasVColors  = (myFlagColor == 1);
+                Standard_Boolean hasVColors  = false;//(myFlagColor == 1);
 
+                std::cout<<"[OK]"<<std::endl;
+                std::cout<<"   Getting the surface properties of the face..."<<std::flush;
+
+                // get the surface properties. These are used to define the vertex colors
+                Standard_Real fUMin, fUMax, fVMin, fVMax;
+                BRepTools::UVBounds(TopoDS::Face(face), fUMin, fUMax, fVMin, fVMax);
+
+                Standard_Real fU = (fUMax-fUMin)/2.0;
+                Standard_Real fV = (fVMax-fVMin)/2.0;
+                Handle(Geom_Surface) surface = BRep_Tool::Surface(face,loc);
+//                GeomLProp_SLProps aSLProps(surface,2,1e-8);
+                GeomLProp_SLProps aSLProps(surface,fU, fV, 1, Precision::Confusion());
+
+                std::cout<<"[OK]"<<std::endl;
+                std::cout<<"   Creating an array of triangles..."<<std::flush;
+
+                // create a new array of triangles
                 Handle(Graphic3d_ArrayOfTriangles) anArray =
                     new Graphic3d_ArrayOfTriangles ( triangulation->NbNodes(),        //maxVertexs
                             triangulation->NbTriangles() * 3,//maxEdges
@@ -119,65 +154,107 @@ void TIGLAISColormapped::Compute(const Handle(PrsMgr_PresentationManager3d)& aPr
                             Standard_False    //hasTexels
                             );
 
-                GeomLProp_SLProps aSLProps(surface,1,1e-8);
-                if(triangulation->HasUVNodes()) {
-                    for (Standard_Integer ni = UVNodes.Lower(); ni <= UVNodes.Upper(); ni++ ) {
+                Handle(Graphic3d_ArrayOfPolylines) polylines =
+                    new Graphic3d_ArrayOfPolylines ( triangles.Length()* 6,
+                                                     triangles.Length()* 6 );
+                std::cout<<"[OK]"<<std::endl;
 
-                        // Compute local properties for Node ni
+#if 0
+                std::cout<<"   Going through all triangles"<<std::endl;
+                for (Standard_Integer i = 1; i< triangles.Length(); i++)
+                {
+                    Poly_Triangle triangle = triangles.Value(i);
+                    int n1,n2,n3;
+                    triangle.Get(n1,n2,n3);
+                    gp_Pnt p1 = Nodes.Value(n1);
+                    gp_Pnt p2 = Nodes.Value(n2);
+                    gp_Pnt p3 = Nodes.Value(n3);
 
-                        aSLProps.SetParameters(UVNodes(ni).X(),UVNodes(ni).Y());
-                        if(aSLProps.IsCurvatureDefined()) {
-                            aSLProps.MinCurvature();
-                            aSLProps.MaxCurvature();
-                            aSLProps.MeanCurvature();
-                            aSLProps.GaussianCurvature();
+                    // edge1
+                    polylines->AddBound ( 2 );
+                    polylines->AddVertex ( p1.X(), p1.Y(), p1.Z() );
+                    polylines->AddVertex ( p2.X(), p2.Y(), p2.Z() );
+
+                    // edge1
+                    polylines->AddBound ( 2 );
+                    polylines->AddVertex ( p2.X(), p2.Y(), p2.Z() );
+                    polylines->AddVertex ( p3.X(), p3.Y(), p3.Z() );
+
+                    // edge1
+                    polylines->AddBound ( 2 );
+                    polylines->AddVertex ( p3.X(), p3.Y(), p3.Z() );
+                    polylines->AddVertex ( p1.X(), p1.Y(), p1.Z() );
+
+                    for (Standard_Integer k = 1; k <=3; k++)
+                    {
+                        int vertexIdx = triangle.Value(k);
+                        std::cout<<"      vertex "<<vertexIdx<<std::flush;
+                        if ( k==1 ) {
+                            aSLProps.SetParameters(UVNodes(n1).X(), UVNodes(n1).Y());
+                            std::cout<<", U = "<<UVNodes(n1).X()<<", V = "<<UVNodes(n1).Y()<<std::flush;
+                        }
+                        else if ( k==2 )
+                        {
+                            aSLProps.SetParameters(UVNodes(n2).X(), UVNodes(n2).Y());
+                            std::cout<<", U = "<<UVNodes(n2).X()<<", V = "<<UVNodes(n2).Y()<<std::flush;
+                        }
+                        else
+                        {
+                            aSLProps.SetParameters(UVNodes(n3).X(), UVNodes(n3).Y());
+                            std::cout<<", U = "<<UVNodes(n3).X()<<", V = "<<UVNodes(n3).Y()<<std::flush;
+                        }
+                        if( aSLProps.IsCurvatureDefined() )
+                        {
+                            // get the curvature of the vertices, e.g.
+                            //      aSLProps.MinCurvature();
+                            //      aSLProps.MaxCurvature();
+                            //      aSLProps.MeanCurvature();
+                            //      aSLProps.GaussianCurvature();
+                            Standard_Real value = aSLProps.MaxCurvature();
+
+
+                            std::cout<<", Gaussian Curvature = "<<value<<std::endl;
+
+                            gp_Pnt vertex = Nodes.Value(vertexIdx);
+                            anArray->AddVertex(vertex, Quantity_NOC_BLUEVIOLET);
+                            TheGroup->Marker(Graphic3d_Vertex(vertex.X(),vertex.Y(),vertex.Z()));
                         }
                     }
-
-                    const TColStd_Array1OfInteger& colors = myColor->Array1();
-                    for (Standard_Integer i = Nodes.Lower(); i <= Nodes.Upper(); i++ ) {
-                            anArray->AddVertex(Nodes(i), AttenuateColor(colors(i), ambient));
-                    }
-
-                    Standard_Integer indexTriangle[3] = {0,0,0};
-                    for (Standard_Integer i = triangles.Lower(); i<= triangles.Upper(); i++ ) {
-                        triangles(i).Get(indexTriangle[0], indexTriangle[1], indexTriangle[2]);
-                        anArray->AddEdge(indexTriangle[0]);
-                        anArray->AddEdge(indexTriangle[1]);
-                        anArray->AddEdge(indexTriangle[2]);
-                    }
                 }
-                TheGroup->AddPrimitiveArray(anArray);
-            }
-            TheGroup->SetPrimitivesAspect(aspect);
 
-            break;
+#else
+                std::cout<<"   Goint through all vertices"<<std::endl;
+                for (Standard_Integer i=UVNodes.Lower(); i<=UVNodes.Upper(); i++) {
+
+                    std::cout<<"      vertex "<<i<<std::flush;
+
+                    // get the curvature of the vertices, e.g.
+                    //      aSLProps.MinCurvature();
+                    //      aSLProps.MaxCurvature();
+                    //      aSLProps.MeanCurvature();
+                    //      aSLProps.GaussianCurvature();
+                    aSLProps.SetParameters(UVNodes(i).X(),UVNodes(i).Y());
+                    if( !aSLProps.IsCurvatureDefined() ){
+                        std::cout<<"Aw fuck it..."<<std::endl;
+                    }
+                    Standard_Real value = aSLProps.MaxCurvature();
+
+                    std::cout<<", U = "<<UVNodes(i).X()<<", V = "<<UVNodes(i).Y()<<std::flush;
+                    std::cout<<", Gaussian Curvature = "<<value<<std::endl;
+
+                    anArray->AddVertex(Nodes(i), Quantity_NOC_BLUEVIOLET);
+                }
+#endif
+
+                TheGroup->AddPrimitiveArray(anArray);
+
+//                // draw mesh edges
+//                TheGroup->SetPrimitivesAspect ( new Graphic3d_AspectLine3d( Quantity_NameOfColor::Quantity_NOC_BLACK , Aspect_TOL_SOLID, 0.1 ) );
+//                TheGroup->AddPrimitiveArray ( polylines );
+            }
         }
-//        case 0: {
-//            const TColgp_Array1OfPnt& nodes = myShape.Nodes();
-//            const Poly_Array1OfTriangle& triangles = myShape.Triangles();
-//            Handle(Graphic3d_AspectLine3d) aspect = myDrawer->WireAspect()->Aspect();
-     
-//            Handle(Graphic3d_ArrayOfPrimitives) segments =  new Graphic3d_ArrayOfSegments(nodes.Length(),triangles.Length()*6);
-//            for (Standard_Integer i = nodes.Lower(); i <= nodes.Upper(); i++ ) {
-//                segments->AddVertex(nodes(i));
-//            }
-     
-//            Standard_Integer indexTriangle[3] = {0,0,0};
-//            for (Standard_Integer i = triangles.Lower(); i<= triangles.Upper(); i++ ) {
-//                triangles(i).Get(indexTriangle[0], indexTriangle[1], indexTriangle[2]);
-//                segments->AddEdge(indexTriangle[0]);
-//                segments->AddEdge(indexTriangle[1]);
-//                segments->AddEdge(indexTriangle[1]);
-//                segments->AddEdge(indexTriangle[2]);
-//                segments->AddEdge(indexTriangle[2]);
-//                segments->AddEdge(indexTriangle[0]);
-//            }
-     
-//            TheGroup->SetPrimitivesAspect(aspect);
-//            TheGroup->AddPrimitiveArray(segments);
-//        }
-    }
+        break;
+     }
 }
 
 ////=======================================================================
